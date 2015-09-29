@@ -20,14 +20,6 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
-/* List of processes in THREAD_READY state, that is, processes
-   that are ready to run but not actually running. */
-static struct list ready_list;
-
-/* List of all processes.  Processes are added to this list
-   when they are first scheduled and removed when they exit. */
-static struct list all_list;
-
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -70,6 +62,29 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+
+static hash_hash_func hash_func;
+static hash_less_func less_func;
+
+static unsigned
+hash_func (const struct hash_elem *e, void *aux)
+{
+  struct thread *thread = hash_entry(e, struct thread, hash_elem);
+  return hash_int(thread->tick_to_awake);
+}
+/* Compares the value of two hash elements A and B, given
+   auxiliary data AUX.  Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+static bool
+less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux)
+{
+  struct thread *thread1 = hash_entry(a, struct thread, hash_elem);
+  struct thread *thread2 = hash_entry(b, struct thread, hash_elem);
+  if (thread1->tick_to_awake < thread2->tick_to_awake)
+    return true;
+  else
+    return false;
+}
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -115,6 +130,7 @@ thread_start (void)
 
   /* Wait for the idle thread to initialize idle_thread. */
   sema_down (&idle_started);
+  hash_init (&sleeping_hash, &hash_func, &less_func, NULL);
 }
 
 /* Called by the timer interrupt handler at each timer tick.

@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <hash.h>
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -92,6 +93,8 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    struct hash_elem hash_elem;
+    int64_t tick_to_awake;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -101,6 +104,17 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+/* List of processes in THREAD_READY state, that is, processes
+   that are ready to run but not actually running. */
+struct list ready_list;
+
+/* List of all processes.  Processes are added to this list
+   when they are first scheduled and removed when they exit. */
+struct list all_list;
+
+/* Hash table for storing sleeping threads */
+struct hash sleeping_hash;
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
