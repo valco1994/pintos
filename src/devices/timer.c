@@ -93,13 +93,8 @@ timer_sleep (int64_t ticks_to_sleep)
   {
     ASSERT (intr_get_level () == INTR_ON);
     enum intr_level old_level = intr_disable();
-    printf(">>> Thread %d should be awaken at %d\n", thread_current()->tid, ticks + ticks_to_sleep);
     thread_current()->tick_to_awake = ticks + ticks_to_sleep;
-    printf("Inserting into hash: tid = %d, tick_to_awake = %d\n", thread_current()->tid, thread_current()->tick_to_awake);
-    struct hash_elem *inserted = hash_insert(&sleeping_hash, &thread_current()->hash_elem);
-    struct thread *thread = hash_entry(inserted, struct thread, hash_elem);
-    if (inserted != NULL)
-        printf("Equal element was found into the hash: tid = %d, tick_to_awake = %d\n", thread->tid, thread->tick_to_awake);
+    hash_insert(&sleeping_hash, &thread_current()->hash_elem);
     thread_block();
     intr_set_level(old_level);
   }
@@ -181,7 +176,6 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   enum intr_level old_level = intr_disable();
   ticks++;
-  printf("tick %d\n", ticks);
   thread_tick ();
   struct thread temp;
   temp.tick_to_awake = ticks;
@@ -193,7 +187,6 @@ timer_interrupt (struct intr_frame *args UNUSED)
     if (toAwake != NULL)
     {
       struct thread *thread = hash_entry(toAwake, struct thread, hash_elem);
-      printf(">>> Awaking thread %d at %d\n", thread->tid, ticks);
       list_push_back(&ready_list, &thread->elem);
       hash_delete(&sleeping_hash, &thread->hash_elem);
     }
