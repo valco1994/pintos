@@ -80,10 +80,12 @@ less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux)
 {
   struct thread *thread1 = hash_entry(a, struct thread, hash_elem);
   struct thread *thread2 = hash_entry(b, struct thread, hash_elem);
-  if (thread1->tick_to_awake < thread2->tick_to_awake)
-    return true;
+  if (thread1->tid == -1 || thread2->tid == -1)
+  {
+    return thread1->tick_to_awake < thread2->tick_to_awake;
+  }
   else
-    return false;
+      return thread1->tick_to_awake < thread2->tick_to_awake ||  thread1->tid < thread2->tid; 
 }
 
 /* Initializes the threading system by transforming the code
