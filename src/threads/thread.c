@@ -72,6 +72,7 @@ hash_func (const struct hash_elem *e, void *aux)
   struct thread *thread = hash_entry(e, struct thread, hash_elem);
   return hash_int(thread->tick_to_awake);
 }
+
 /* Compares the value of two hash elements A and B, given
    auxiliary data AUX.  Returns true if A is less than B, or
    false if A is greater than or equal to B. */
@@ -359,7 +360,7 @@ thread_foreach (thread_action_func *func, void *aux)
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
-thread_set_priority (int new_priority) 
+thread_set_priority(int new_priority)
 {
   thread_current ()->priority = new_priority;
 }

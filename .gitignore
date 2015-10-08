@@ -2,3 +2,8 @@
 src/utils
 *.swp
 *~
+*.config
+*.creator
+*.creator.user
+*.files
+*.includes
