@@ -15,6 +15,8 @@
 #include "userprog/process.h"
 #endif
 
+#define DEBUG
+
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -66,13 +68,14 @@ static tid_t allocate_tid (void);
 static hash_hash_func hash_func;
 static hash_less_func less_func;
 
+static list_less_func ready_list_less_func;
+
 static unsigned
 hash_func (const struct hash_elem *e, void *aux)
 {
   struct thread *thread = hash_entry(e, struct thread, hash_elem);
   return hash_int(thread->tick_to_awake);
 }
-
 /* Compares the value of two hash elements A and B, given
    auxiliary data AUX.  Returns true if A is less than B, or
    false if A is greater than or equal to B. */
@@ -87,6 +90,16 @@ less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux)
   }
   else
       return thread1->tick_to_awake < thread2->tick_to_awake ||  thread1->tid < thread2->tid; 
+}
+
+bool ready_list_less_func(const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+    struct thread *ta = list_entry(a, struct thread, elem);
+    struct thread *tb = list_entry(b, struct thread, elem);
+    if (ta->priority > tb->priority)
+        return true;
+    else
+        return ta->cpu_burst > tb->cpu_burst;
 }
 
 /* Initializes the threading system by transforming the code
@@ -247,6 +260,30 @@ thread_block (void)
   schedule ();
 }
 
+#ifdef DEBUG
+void dump_ready_list(void)
+{
+    struct list_elem *node = (&ready_list.head)->next;
+    if (!list_empty(&ready_list))
+    {
+        struct thread *head = list_entry(list_front(&ready_list), struct thread, elem);
+        printf("FIRST THREAD:\ttid: %d, priority: %d\n", head->tid, head->priority);
+    }
+    while (node->next != NULL)
+    {
+      struct thread *temp = list_entry(node, struct thread, elem);
+      if (temp != NULL)
+      {
+          printf("TID: %d, priority: %d\n", temp->tid, temp->priority);
+      }
+      else
+          printf("null\n");
+      node = node->next;
+    }
+    printf("Done\n\n");
+}
+#endif
+
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -264,9 +301,17 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+
+  dump_ready_list();
+  list_insert_ordered(&ready_list, &t->elem, &ready_list_less_func, NULL);
+  dump_ready_list();
+
   t->status = THREAD_READY;
   intr_set_level (old_level);
+  /*if (thread_current()->priority < t->priority)
+  {
+    thread_yield();
+  }*/
 }
 
 /* Returns the name of the running thread. */
@@ -335,7 +380,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered(&ready_list, &cur->elem, &ready_list_less_func, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -360,7 +405,7 @@ thread_foreach (thread_action_func *func, void *aux)
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
-thread_set_priority(int new_priority)
+thread_set_priority (int new_priority)
 {
   thread_current ()->priority = new_priority;
 }
@@ -487,6 +532,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->cpu_burst = 1;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
