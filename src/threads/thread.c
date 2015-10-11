@@ -12,10 +12,8 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
-#include "userprog/process.h"
+    #include "userprog/process.h"
 #endif
-
-#define DEBUG
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -68,14 +66,13 @@ static tid_t allocate_tid (void);
 static hash_hash_func hash_func;
 static hash_less_func less_func;
 
-static list_less_func ready_list_less_func;
-
 static unsigned
 hash_func (const struct hash_elem *e, void *aux)
 {
   struct thread *thread = hash_entry(e, struct thread, hash_elem);
   return hash_int(thread->tick_to_awake);
 }
+
 /* Compares the value of two hash elements A and B, given
    auxiliary data AUX.  Returns true if A is less than B, or
    false if A is greater than or equal to B. */
@@ -92,14 +89,20 @@ less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux)
       return thread1->tick_to_awake < thread2->tick_to_awake ||  thread1->tid < thread2->tid; 
 }
 
-bool ready_list_less_func(const struct list_elem *a, const struct list_elem *b, void *aux)
+
+bool less_priority_func(const struct list_elem *a, const struct list_elem *b, void *aux)
 {
     struct thread *ta = list_entry(a, struct thread, elem);
     struct thread *tb = list_entry(b, struct thread, elem);
-    if (ta->priority > tb->priority)
-        return true;
-    else
-        return ta->cpu_burst > tb->cpu_burst;
+
+    #if SHEDULER_ALG == SJF
+        if (ta->priority < tb->priority)
+            return true;
+        else
+            return ta->cpu_burst <= tb->cpu_burst;
+    #else
+        return ta->priority <= tb->priority;
+    #endif
 }
 
 /* Initializes the threading system by transforming the code
@@ -167,8 +170,22 @@ thread_tick (void)
     kernel_ticks++;
 
   /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
+  struct thread *highest_ready;
+  if (!list_empty(&ready_list))
+      highest_ready = list_entry(list_back(&ready_list), struct thread, elem);
+  else highest_ready = NULL;
+
+  ++thread_ticks;
+
+#if SHEDULER_ALG == ROUND_ROBIN
+  if ((highest_ready != NULL) &&
+          ((t->priority < highest_ready->priority) ||
+          (t->priority == highest_ready->priority && thread_ticks >= TIME_SLICE)))
     intr_yield_on_return ();
+#else
+  if (highest_ready != NULL && t->priority < highest_ready->priority)
+    intr_yield_on_return ();
+#endif
 }
 
 /* Prints thread statistics. */
@@ -302,16 +319,12 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
 
-  dump_ready_list();
-  list_insert_ordered(&ready_list, &t->elem, &ready_list_less_func, NULL);
-  dump_ready_list();
+  //dump_ready_list();
+  list_insert_ordered(&ready_list, &t->elem, &less_priority_func, NULL);
+  //dump_ready_list();
 
   t->status = THREAD_READY;
   intr_set_level (old_level);
-  /*if (thread_current()->priority < t->priority)
-  {
-    thread_yield();
-  }*/
 }
 
 /* Returns the name of the running thread. */
@@ -380,7 +393,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered(&ready_list, &cur->elem, &ready_list_less_func, NULL);
+    list_insert_ordered(&ready_list, &cur->elem, &less_priority_func, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -408,6 +421,13 @@ void
 thread_set_priority (int new_priority)
 {
   thread_current ()->priority = new_priority;
+
+  struct thread *highest_ready;
+  if (!list_empty(&ready_list))
+      highest_ready = list_entry(list_back(&ready_list), struct thread, elem);
+  else highest_ready = NULL;
+  if (highest_ready != NULL && thread_current()->priority < highest_ready->priority)
+      thread_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -532,7 +552,9 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+#if SHEDULER_ALG == SJF
   t->cpu_burst = 1;
+#endif
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -561,7 +583,7 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    return list_entry (list_pop_back (&ready_list), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
