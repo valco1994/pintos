@@ -112,12 +112,28 @@ sema_up (struct semaphore *sema)
 
   ASSERT (sema != NULL);
 
+  struct thread *t = NULL;
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters))
-    thread_unblock (list_entry (list_pop_back (&sema->waiters),
-                                struct thread, elem));
+  {
+      t = list_entry (list_pop_back (&sema->waiters),
+                                struct thread, elem);
+      thread_unblock(t);
+  }
   sema->value++;
   intr_set_level (old_level);
+
+  if (t != NULL && t->priority > thread_current()->priority)
+  {
+      if (intr_context())
+      {
+          intr_yield_on_return();
+      }
+      else
+      {
+          thread_yield();
+      }
+  }
 }
 
 static void sema_test_helper (void *sema_);
@@ -178,7 +194,7 @@ lock_init (struct lock *lock)
   ASSERT (lock != NULL);
 
   lock->holder = NULL;
-  lock->priority_changed = false;
+  list_init(&lock->donatedBy);
   sema_init (&lock->semaphore, 1);
 }
 
@@ -196,8 +212,27 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
+
+  enum intr_level old_level = intr_disable ();
+  struct thread *t = thread_current();
+  if (lock->holder != NULL && isThreadSystemInitialized)
+  {
+      int delta = t-> priority - lock->holder->priority;
+      if (delta > 0)
+      {
+          t->given_donation = delta;
+          t->priority -= delta;
+
+          list_push_back(&lock->donatedBy, &t->allelem);
+          lock->holder->priority += delta;
+      }
+  }
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  lock->enter_priority = t->priority;
+  list_push_front(&t->locks_list, &lock->elem);
+
+  intr_set_level(old_level);
+  lock->holder = t;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -231,6 +266,21 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  enum intr_level old_level = intr_disable ();
+  if (isThreadSystemInitialized)
+  {
+      struct list_elem *donationFromEntry;
+      while (!list_empty(&lock->donatedBy))
+      {
+          donationFromEntry = list_pop_front(&lock->donatedBy);
+          struct thread *donationFrom = list_entry(donationFromEntry, struct thread, allelem);
+          donationFrom->priority += donationFrom->given_donation;
+          donationFrom->given_donation = 0;
+      }
+  }
+  intr_set_level(old_level);
+  lock->holder->priority = lock->enter_priority;
+  list_pop_front(&lock->holder->locks_list);
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }

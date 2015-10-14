@@ -1,4 +1,4 @@
-#include "threads/thread.h"
+﻿#include "threads/thread.h"
 #include <debug.h>
 #include <stddef.h>
 #include <random.h>
@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "sleeping_threads.h"
 #ifdef USERPROG
     #include "userprog/process.h"
 #endif
@@ -54,43 +55,14 @@ bool thread_mlfqs;
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
-static struct thread *running_thread (void);
 static struct thread *next_thread_to_run (void);
 static void init_thread (struct thread *, const char *name, int priority);
-static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
-static hash_hash_func hash_func;
-static hash_less_func less_func;
-
-static unsigned
-hash_func (const struct hash_elem *e, void *aux)
-{
-  struct thread *thread = hash_entry(e, struct thread, hash_elem);
-  return hash_int(thread->tick_to_awake);
-}
-
-/* Compares the value of two hash elements A and B, given
-   auxiliary data AUX.  Returns true if A is less than B, or
-   false if A is greater than or equal to B. */
-static bool
-less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux)
-{
-  struct thread *thread1 = hash_entry(a, struct thread, hash_elem);
-  struct thread *thread2 = hash_entry(b, struct thread, hash_elem);
-  if (thread1->tid == -1 || thread2->tid == -1)
-  {
-    return thread1->tick_to_awake < thread2->tick_to_awake;
-  }
-  else
-      return thread1->tick_to_awake < thread2->tick_to_awake ||  thread1->tid < thread2->tid; 
-}
-
-
-bool less_priority_func(const struct list_elem *a, const struct list_elem *b, void *aux)
+bool less_priority_func(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
     struct thread *ta = list_entry(a, struct thread, elem);
     struct thread *tb = list_entry(b, struct thread, elem);
@@ -149,7 +121,8 @@ thread_start (void)
 
   /* Wait for the idle thread to initialize idle_thread. */
   sema_down (&idle_started);
-  hash_init (&sleeping_hash, &hash_func, &less_func, NULL);
+  hash_init (&sleeping_hash, &sleeping_hash_func, &sleeping_hash_less_func, NULL);
+  isThreadSystemInitialized = true;
 }
 
 /* Called by the timer interrupt handler at each timer tick.
@@ -258,6 +231,8 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  if (thread_current()->priority < t->priority)
+      thread_yield();
   return tid;
 }
 
@@ -278,6 +253,8 @@ thread_block (void)
 }
 
 #ifdef DEBUG
+void dump_ready_list(void);
+
 void dump_ready_list(void)
 {
     struct list_elem *node = (&ready_list.head)->next;
@@ -319,9 +296,7 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
 
-  //dump_ready_list();
   list_insert_ordered(&ready_list, &t->elem, &less_priority_func, NULL);
-  //dump_ready_list();
 
   t->status = THREAD_READY;
   intr_set_level (old_level);
@@ -416,25 +391,48 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
+void add_locks_enter_priority(struct thread *t, int delta)
+{
+    struct list_elem *lock_elem;
+    for (lock_elem = t->locks_list.head.next; lock_elem != &t->locks_list.tail; lock_elem = lock_elem->next)
+    {
+        list_entry(lock_elem, struct lock, elem)->enter_priority += delta;
+        t->priority += delta;
+    }
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority)
 {
-  thread_current ()->priority = new_priority;
+  struct thread *t = thread_current();
+  int delta = new_priority - t->priority;
 
-  struct thread *highest_ready;
-  if (!list_empty(&ready_list))
-      highest_ready = list_entry(list_back(&ready_list), struct thread, elem);
-  else highest_ready = NULL;
-  if (highest_ready != NULL && thread_current()->priority < highest_ready->priority)
-      thread_yield();
+  if (delta >= 0)
+  {
+      add_locks_enter_priority(t, delta);
+      t->priority -= delta;
+  }
+  else
+  {
+      if (!list_empty(&t->locks_list))
+      {
+          struct list_elem *back_elem = list_back(&t->locks_list);
+          struct lock *back = list_entry(back_elem, struct lock, elem);
+          back->enter_priority = new_priority;
+      }
+      else
+      {
+          t->priority -= delta;
+      }
+  }
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  return thread_current()->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -532,7 +530,7 @@ running_thread (void)
 }
 
 /* Returns true if T appears to point to a valid thread. */
-static bool
+bool
 is_thread (struct thread *t)
 {
   return t != NULL && t->magic == THREAD_MAGIC;
@@ -552,6 +550,8 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->given_donation = 0;
+  list_init(&t->locks_list);
 #if SHEDULER_ALG == SJF
   t->cpu_burst = 1;
 #endif

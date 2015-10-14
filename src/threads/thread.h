@@ -100,6 +100,9 @@ struct thread
     struct hash_elem hash_elem;
     int64_t tick_to_awake;
 
+    int given_donation; /* priority, that was donated by this thread to lock holder */
+    struct list locks_list; /* stack of locks, that this thread holds*/
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -116,9 +119,6 @@ struct list ready_list;
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 struct list all_list;
-
-/* Hash table for storing sleeping threads */
-struct hash sleeping_hash;
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -156,6 +156,11 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+bool is_thread (struct thread *t);
+struct thread *running_thread (void);
+
 list_less_func less_priority_func;
+
+bool isThreadSystemInitialized;
 
 #endif /* threads/thread.h */
