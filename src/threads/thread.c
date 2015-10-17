@@ -391,6 +391,7 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
+void add_locks_enter_priority(struct thread *t, int delta);
 void add_locks_enter_priority(struct thread *t, int delta)
 {
     struct list_elem *lock_elem;

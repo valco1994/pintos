@@ -32,6 +32,42 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+
+void
+donate(struct thread *from, struct lock *lock);
+
+//elem_to_thread & print_threads_list are auxiliary functions for debugging
+struct thread*
+elem_to_thread(struct list_elem *elem);
+
+struct thread*
+elem_to_thread(struct list_elem *eleml)
+{
+    return list_entry(eleml, struct thread, elem);
+}
+
+struct lock*
+elem_to_lock(struct list_elem *elem);
+
+struct lock*
+elem_to_lock(struct list_elem *eleml)
+{
+    return list_entry(eleml, struct lock, elem);
+}
+
+void print_threads_list(struct list* list);
+
+void print_threads_list(struct list* list)
+{
+    struct list_elem *elem;
+    printf("\n\n >>>\n");
+    for ( elem = list_begin(list); elem != list_end(list); elem = list_next(elem))
+    {
+        struct thread *t =  list_entry (elem, struct thread, elem);
+        printf("%s: priority - %d\n", t->name, t->priority);
+    }
+    printf("\n\n >>>\n");
+}
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -116,6 +152,7 @@ sema_up (struct semaphore *sema)
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters))
   {
+      list_sort(&sema->waiters, less_priority_func, NULL);
       t = list_entry (list_pop_back (&sema->waiters),
                                 struct thread, elem);
       thread_unblock(t);
@@ -198,6 +235,29 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
+void
+donate(struct thread *from, struct lock *lock)
+{
+    if (lock->holder != NULL && isThreadSystemInitialized)
+    {
+        int delta = from-> priority - lock->holder->priority;
+        if (delta > 0)
+        {
+            from->given_donation = delta;
+            from->priority -= delta;
+
+            list_push_back(&lock->donatedBy, &from->donate_elem);
+            lock->holder->priority += delta;
+            // Nested donation don't work with actual list implementation
+            /*if (lock->holder->waiting_for_lock != NULL)
+            {
+                donate(lock->holder, lock->holder->waiting_for_lock);
+                list_sort(&lock->holder->waiting_for_lock->semaphore.waiters, less_priority_func, NULL);
+            }*/
+        }
+    }
+}
+
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -215,7 +275,9 @@ lock_acquire (struct lock *lock)
 
   enum intr_level old_level = intr_disable ();
   struct thread *t = thread_current();
-  if (lock->holder != NULL && isThreadSystemInitialized)
+  t->waiting_for_lock = lock;
+  donate(t, lock);
+  /*if (lock->holder != NULL && isThreadSystemInitialized)
   {
       int delta = t-> priority - lock->holder->priority;
       if (delta > 0)
@@ -223,16 +285,18 @@ lock_acquire (struct lock *lock)
           t->given_donation = delta;
           t->priority -= delta;
 
-          list_push_back(&lock->donatedBy, &t->allelem);
+          list_push_back(&lock->donatedBy, &t->);
           lock->holder->priority += delta;
       }
-  }
+  }*/
   sema_down (&lock->semaphore);
+  t->waiting_for_lock = NULL;
   lock->enter_priority = t->priority;
-  list_push_front(&t->locks_list, &lock->elem);
+  if (isThreadSystemInitialized)
+    list_push_front(&t->locks_list, &lock->elem);
 
-  intr_set_level(old_level);
   lock->holder = t;
+  intr_set_level(old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -265,23 +329,37 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+  //printf("check assert");
+  //printf("lock address is %#08X\n", lock);
+  //printf("lock holder address is %#08X\n", lock->holder);
+  //printf("lock->holder->locks_list is %#08X\n", lock->holder->locks_list );
+  //ASSERT (!list_empty(&lock->holder->locks_list));
+  //printf("assert checked\n");
 
   enum intr_level old_level = intr_disable ();
   if (isThreadSystemInitialized)
   {
+      size_t holder_lock_list_size = list_size(&lock->holder->locks_list);
       struct list_elem *donationFromEntry;
       while (!list_empty(&lock->donatedBy))
       {
-          donationFromEntry = list_pop_front(&lock->donatedBy);
-          struct thread *donationFrom = list_entry(donationFromEntry, struct thread, allelem);
+          donationFromEntry = list_pop_back(&lock->donatedBy);
+          struct thread *donationFrom = list_entry(donationFromEntry, struct thread, donate_elem);
           donationFrom->priority += donationFrom->given_donation;
+          if (holder_lock_list_size > 1)
+          {
+              lock->holder->priority -= donationFrom->given_donation;
+          }
           donationFrom->given_donation = 0;
       }
+      if (holder_lock_list_size == 1)
+      {
+        lock->holder->priority = lock->enter_priority; //ERROR!
+      }
+      list_pop_front(&lock->holder->locks_list);
   }
-  intr_set_level(old_level);
-  lock->holder->priority = lock->enter_priority;
-  list_pop_front(&lock->holder->locks_list);
   lock->holder = NULL;
+  intr_set_level(old_level);
   sema_up (&lock->semaphore);
 }
 

@@ -96,12 +96,14 @@ struct thread
     unsigned int cpu_burst;
 #endif
     /* Shared between thread.c and synch.c. */
+    struct list_elem donate_elem;
     struct list_elem elem;              /* List element. */
     struct hash_elem hash_elem;
     int64_t tick_to_awake;
 
     int given_donation; /* priority, that was donated by this thread to lock holder */
     struct list locks_list; /* stack of locks, that this thread holds*/
+    struct lock *waiting_for_lock;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
