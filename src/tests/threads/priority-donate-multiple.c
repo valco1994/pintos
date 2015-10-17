@@ -33,14 +33,8 @@ test_priority_donate_multiple (void)
   lock_init (&b);
 
   lock_acquire (&a);
-  ASSERT(a.holder == thread_current());
-  ASSERT(a.enter_priority == PRI_DEFAULT);
-  ASSERT(list_empty(&a.donatedBy));
 
   lock_acquire (&b);
-  ASSERT(b.holder == thread_current());
-  ASSERT(b.enter_priority == PRI_DEFAULT);
-  ASSERT(list_empty(&b.donatedBy));
 
   thread_create ("a", PRI_DEFAULT + 1, a_thread_func, &a);
   msg ("Main thread should have priority %d.  Actual priority: %d.",

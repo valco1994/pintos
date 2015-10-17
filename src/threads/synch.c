@@ -276,8 +276,8 @@ lock_acquire (struct lock *lock)
   enum intr_level old_level = intr_disable ();
   struct thread *t = thread_current();
   t->waiting_for_lock = lock;
-  donate(t, lock);
-  /*if (lock->holder != NULL && isThreadSystemInitialized)
+  //donate(t, lock);
+  if (lock->holder != NULL && isThreadSystemInitialized)
   {
       int delta = t-> priority - lock->holder->priority;
       if (delta > 0)
@@ -285,10 +285,10 @@ lock_acquire (struct lock *lock)
           t->given_donation = delta;
           t->priority -= delta;
 
-          list_push_back(&lock->donatedBy, &t->);
+          list_push_back(&lock->donatedBy, &t->donate_elem);
           lock->holder->priority += delta;
       }
-  }*/
+  }
   sema_down (&lock->semaphore);
   t->waiting_for_lock = NULL;
   lock->enter_priority = t->priority;
@@ -356,7 +356,7 @@ lock_release (struct lock *lock)
       {
         lock->holder->priority = lock->enter_priority; //ERROR!
       }
-      list_pop_front(&lock->holder->locks_list);
+      list_remove(&lock->elem);
   }
   lock->holder = NULL;
   intr_set_level(old_level);
