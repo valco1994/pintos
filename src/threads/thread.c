@@ -412,7 +412,7 @@ thread_set_priority (int new_priority)
   if (delta >= 0)
   {
       add_locks_enter_priority(t, delta);
-      t->priority -= delta;
+      t->priority += delta;
   }
   else
   {
@@ -424,7 +424,7 @@ thread_set_priority (int new_priority)
       }
       else
       {
-          t->priority -= delta;
+          t->priority += delta;
       }
   }
 }
